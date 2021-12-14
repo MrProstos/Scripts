@@ -1,0 +1,60 @@
+#!/bin/bash
+
+function auth_false_block_ip () {
+# Принимает не уникальный список IP 
+    for i in $1
+    do
+        num_ip=$(grep -o "${i}" <<< $1 | wc -l)
+        if [[ $num_ip -ge 3 ]]
+        then
+            echo $i >> block_ip_ssh.log
+            iptables -t filter -A INPUT -s $i/32 -j REJECT
+        fi
+    done
+}
+
+function time_window () {
+# Вычитаение из самой последней даты самую первую
+    first=$(date -d ${1::9} +%s)
+    last=$(date -d ${1:(-9)} +%s)
+    let "block_data=$last-$first"
+    return $block_data
+}
+
+function ssh_block_ip () {
+    ip_failed=$(grep -a "Failed password" /var/log/auth.log)
+    ip_block=$(grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' <<< $ip_failed)
+    time_failed "$ip_failed" "$ip_block"
+    for i in $ip_block
+        do
+            time_block=$(grep -a "$i" <<< $ip_failed | cut -c8-16)
+            time_window "$time_block"
+            if [[ $block_data -ge 180 ]]
+            then
+                auth_false_block_ip "$ip_block"
+            fi
+        done
+}
+
+function nginx_block_ip () {
+    ip_failed=$(grep "password mismatch" /var/log/nginx/error.log)
+    ip_block=$(grep "password mismatch" /var/log/nginx/error.log | cut -d',' -f2 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
+    for i in $ip_block
+        do
+            time_block=$(grep -a "$i" <<< $ip_failed | cut -c12-19)
+            time_window "$time_block"
+            if [[ $block_data -ge 180 ]]
+            then
+                auth_false_block_ip "$ip_block"
+            fi
+        done
+}
+function cron {
+    read -p "Укажите путь к скрипту : " way_to_file
+    echo "*/3 * * * * $way_to_file/scripts1" >> /tmp/crontab.FI7Lck/crontab 
+}
+if [[ $1 == "-c" ]]; then cron 
+fi
+
+ssh_block_ip
+nginx_block_ip

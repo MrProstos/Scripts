@@ -1,0 +1,130 @@
+#!/bin/bash
+
+function manual () {
+    echo -e "${yellow}Какую функцию хотите выполнить ?
+${yellow}Блокировка хостов ${red}'Failed password'${yellow}, ключ -> ${red}-b
+${yellow}Разбокировка хостов, ключ -> ${red}-u
+${yellow}Сканирование хостов в локальной сети, наличие открытых портов, ключ -> ${red}-s${nocolor}
+${yellow}Для запуска той или иной фунции введите ключ после запуска скрипта${nocolor}"
+
+}
+
+function app () {
+    echo -e "${yellow}Установка зависимостей${nocolor}"
+    apt install arp-scan -y
+    apt-get install nmap -y
+    apt-get install iptables -y
+}
+
+function auth_false_block_ip () {
+# Принимает не уникальный список IP
+    for i in $1
+    do
+        num_ip=$(grep -o "${i}" <<< $1 | wc -l)
+        if [[ $num_ip -ge 3 ]]
+        then
+            echo $i >> block_ip_ssh.unsort
+            iptables -t filter -A INPUT -s $i/24 -j REJECT
+            echo -e "${red} $i Заблокировано${nocolor}"
+        fi
+        sort block_ip_ssh.unsort | uniq -u >> block_ip_ssh.log   
+    done
+}
+
+function time_window () {
+# Вычитаение из самой последней даты самую первую
+    first=$(date -d ${1::9} +%s)
+    last=$(date -d ${1:(-9)} +%s)
+    let "block_data=$last-$first"
+    return $block_data
+}
+
+function time_failed () {
+# Принимает 1-м значением строки с "Failed password" 2-м значение список IP
+    if [[ $change == "s" ]]
+    then
+        for i in $2
+        do
+            time_block=$(grep -a "$i" <<< $1 | cut -c8-16)
+            time_window "$time_block"
+            if [[ $block_data -ge 180 ]]
+            then
+                auth_false_block_ip "$2"
+            fi
+        done
+    elif [[ $change == "n" ]]
+    then
+        for i in $2
+        do
+            time_block=$(grep -a "$i" <<< $1 | cut -c12-19)
+            time_window "$time_block"
+            if [[ $block_data -ge 180 ]]
+            then
+                auth_false_block_ip "$2"
+            fi
+        done
+    fi
+}
+
+function nginx_and_ssh_block_ip () {
+# Основой блок выполнения блокировки IP
+    read -p "На каком сервисе заблокировать IP адреса: nginx - n, ssh - s : " change
+    if [[ $change == "s" ]]
+    then
+        echo -e "${yellow}Блокирова IP проваливших аунтефикацию 3 раза${nocolor}"
+        ip_failed=$(grep -a "Failed password" /var/log/auth.log)
+        ip_block=$(grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' <<< $ip_failed)
+        time_failed "$ip_failed" "$ip_block"
+    elif [[ $change == "n" ]]
+    then
+        echo -e "${yellow}Блокирова IP проваливших аунтефикацию 3 раза${nocolor}"
+        ip_failed=$(grep "password mismatch" /var/log/nginx/error.log)
+        ip_block=$(grep "password mismatch" /var/log/nginx/error.log | cut -d',' -f2 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
+        time_failed "$ip_failed" "$ip_block"
+    fi
+}
+
+function unblock_ip () {
+    read -e -p "Хотите разблокировать все ip ? yes or no -> " yes
+    if [[ $yes == "yes" ]]
+    then
+        iptables -t nat -F
+        echo -e "${yellow} IP разблокированы ${nocolor}"
+    else 
+        read -p "Введите IP для разблокировки -> " ipaddres
+        iptables -t filter -D INPUT -s $ipaddres -j ACCEPT
+    fi 
+}
+
+function scan_host_arpscan() {
+    echo -e "${yellow}ARP Scan позволяет находить активные хосты как в проводных сетях ethernet,так и в беспроводных Wifi сетях.${nocolor}"
+    ls /sys/class/net/
+    read -p "Введите сетевой интерфейс для сканирования -> " eth
+    
+    
+    activ_host=$(arp-scan --interface=$eth --localnet | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | uniq)
+    echo $activ_host
+    for i in $activ_host
+    do
+        nmap -sV $i -p 1-2000     #--open -p 1-2000
+    done
+}
+
+#-----------------------------------------------------Выполение-кода------------------------------------------------------------#
+
+yellow='\e[1;33m'
+red="\e[31m"
+nocolor="\e[0m"
+
+#app
+manual
+
+case $1 in
+-b) nginx_and_ssh_block_ip
+;;
+-u) unblock_ip
+;;
+-s) scan_host_arpscan
+;;
+esac
+
