@@ -1,0 +1,52 @@
+#!/bin/bash
+
+ifconfig
+read -p "Change network -> " net
+waytonet="/etc/sysconfig/network-scripts/ifcfg-$net"
+cat $waytonet
+
+function net-param {
+    read -p "Enter parameters -> " param
+    if grep -q $param $waytonet;then
+        read -p "Then parameter already exists. Change it ? y or n -> " input
+        if [[ $input == "y" ]];then
+            read -p "Enter $param -> " $input
+            sed -i "/$param/d" $waytonet
+            echo "$param=$input" >> $waytonet
+        fi
+    else
+        read -p "Add $param? y or n -> " input
+        if [[ $input == "y" ]];then
+            read -p "Enter $param -> " input
+            echo "$param=$input" >> $waytonet
+        fi
+    fi
+}
+
+function new_param {
+    read -p "Enter parameters -> " param
+    read -p "Enter $param -> " input
+    echo "$param=$input" >> $file
+}
+
+if `ip a | grep -q $net`;then
+    echo "Such file was found"
+    read -p "How many parameters? -> " num
+    for (( i=1; i<$num+1; i++ ))
+    do
+        net_param
+    done
+    cat $waytonet
+else
+    read -p "ifcfg-$net file os not found. Do you want create? y or n -> " input
+    if [[ $input == "y" ]];then
+        read -p "Enter file name -> " filename
+        file=/etc/sysconfig/network-scripts/ifcfg-$filename
+        read -p "How many parameters? -> " num
+         for (( i=1; i<$num+1; i++ ))
+         do
+            new_param
+        done
+        cat $file
+    fi
+fi
