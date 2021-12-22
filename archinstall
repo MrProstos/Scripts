@@ -1,0 +1,44 @@
+#!/bin/bash
+
+read -p "Enter name PC -> " hostname
+read -p "Enter passwd for ROOT -> " password
+read -p "Install graf_interface? y or n -> " graf_interface
+
+ip a
+ping www.ee -c 4
+
+(
+    echo n;
+    echo p;
+    echo 1;
+    echo 2048;
+    echo -e "\n";
+    echo w;
+    echo q
+) | fdisk /dev/sda
+
+mkfs.ext4 /dev/sda1
+mount /dev/sda1 /mnt
+
+pacstrap /mnt base linux linux-firmware base-devel
+
+genfstab -U /mnt >> /mnt/etc/fstab
+chroot="arch-chroot /mnt /bin/bash -c"
+$chroot "ln -sf /usr/share/zoneinfo/Europe/Tallinn /etc/localtime"
+$chroot "hwclock --systohc"
+$chroot "echo $hostname > /etc/hostname"
+$chroot "yes | pacman -S vim nano networkmanager grub"
+$chroot "sed '/en_US.UTF-8 UTF-8/s/^#//' -i /etc/locale.gen"
+$chroot "locale-gen"
+$chroot "mkinitcpio -P"
+echo "root:$password" | arch-chroot /mnt chpasswd
+$chroot "grub-install /dev/sda"
+$chroot "grub-mkconfig -o /boot/grub/grub.cfg"
+
+if [[ $graf_interface == "y" ]];then
+    $chroot "pacman -S gnome gnome-extra --noconfirm"
+    $chroot "systemctl disable ssdm"
+    $chroot "systemctl enable gdm"
+    $chroot "systemctl start gdm"
+fi
+reboot
